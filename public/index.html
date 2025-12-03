@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assistant Scoop</title>
+    <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>Assistant Scoop</h1>
+            <p>Une assistance pour vos achats</p>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-offline">● Connexion...</span>
+            </div>
+        </div>
+
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="spinner"></div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message bot">
+                <img src="logo.png" class="avatar"/>
+                <div class="message-content">
+                    🌟 <strong>Salut et bienvenue chez Scoop !</strong><br><br>
+                    Je suis votre assistant IA personnel.
+                    Je peux vous aider à choisir un produit selon vos critères.<br><br>
+                    💡 <strong>Comment puis-je vous aider ?</strong><br>
+                    • Trouver le PC parfait selon vos besoins<br>
+                    • Comparer des produits et marques<br>
+                    • Respecter votre budget<br>
+                    <br><br>
+                    🕘 <strong>Il y'a un délai de quelques minutes pour avoir une réponse.</strong>
+                    <br><br>
+                    🛠️ Il est à noter que je suis encore en développement et que je peux encore faire des erreurs.
+                </div>
+            </div>
+        </div>
+
+        <div class="typing-indicator" id="typingIndicator">
+            <img class="avatar" src="logo.png"/>
+            <div class="typing-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+
+        <div class="chat-input">
+            <div class="input-group">
+                <input type="text" id="userInput" placeholder="Décrivez vos besoins (ex: laptop gaming 3000 TND)..." onkeypress="handleKeyPress(event)">
+                <button id="sendBtn" onclick="sendMessage()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration API
+        const API_BASE_URL = 'http://localhost:3000/api';
+        let conversationId = 'conv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        let isConnected = false;
+
+        // Classe pour gérer l'API Deepseek
+        class ScoopAI {
+            constructor() {
+                this.checkConnection();
+            }
+
+            async checkConnection() {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/health`);
+                    const data = await response.json();
+                    
+                    if (data.status === 'OK' && data.deepseek) {
+                        this.setConnectionStatus(true);
+                    } else {
+                        this.setConnectionStatus(false, 'Deepseek non configuré');
+                    }
+                } catch (error) {
+                    this.setConnectionStatus(false, 'Serveur non disponible');
+                }
+            }
+
+            setConnectionStatus(connected, message = '') {
+                isConnected = connected;
+                const indicator = document.getElementById('statusIndicator');
+                
+                if (connected) {
+                    indicator.innerHTML = '<span class="status-online">● En ligne</span>';
+                } else {
+                    indicator.innerHTML = `<span class="status-offline">● ${message || 'Hors ligne'}</span>`;
+                }
+            }
+
+            async sendMessage(message) {
+                if (!isConnected) {
+                    throw new Error('Service non disponible. Vérifiez votre connexion.');
+                }
+
+                const response = await fetch(`${API_BASE_URL}/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        conversationId: conversationId
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Erreur de communication');
+                }
+
+                return await response.json();
+            }
+
+            async searchProducts(query, filters = {}) {
+                const params = new URLSearchParams({
+                    q: query,
+                    ...filters
+                });
+
+                const response = await fetch(`${API_BASE_URL}/products/search?${params}`);
+                return await response.json();
+            }
+        }
+
+        const scoopAI = new ScoopAI();
+
+        // Fonctions d'interface utilisateur
+        function addMessage(content, isUser = false, products = []) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+            
+            let messageContent = content;
+            
+            // Formatage du markdown basique
+            messageContent = messageContent
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/\n/g, '<br>');
+            
+            if (!isUser) {
+                let productHTML = '';
+                
+                messageDiv.innerHTML = `
+                    <img class="avatar" src="logo.png"/>
+                    <div class="message-content">
+                        ${messageContent}
+                        ${productHTML}
+                    </div>
+                `;
+            } else {
+                messageDiv.innerHTML = `
+                    <div class="message-content">${messageContent}</div>
+                `;
+            }
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function addErrorMessage(error, canRetry = false) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message bot';
+            
+            let retryButton = '';
+            if (canRetry) {
+                retryButton = '<button class="retry-btn" onclick="retryLastMessage()">🔄 Réessayer</button>';
+            }
+            
+            messageDiv.innerHTML = `
+                <img class="avatar" src="logo.png"/>
+                <div class="message-content">
+                    <div class="error-message">
+                        <strong>Oups ! Une erreur s'est produite :</strong><br>
+                        ${error}
+                        ${retryButton}
+                    </div>
+                </div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function showTyping() {
+            document.getElementById('typingIndicator').style.display = 'flex';
+            document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+        }
+
+        function hideTyping() {
+            document.getElementById('typingIndicator').style.display = 'none';
+        }
+
+        function showLoading() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+
+        function disableInput(disabled = true) {
+            const sendBtn = document.getElementById('sendBtn');
+            const userInput = document.getElementById('userInput');
+            
+            sendBtn.disabled = disabled;
+            userInput.disabled = disabled;
+            
+            if (disabled) {
+                userInput.placeholder = 'Traitement en cours...';
+            } else {
+                userInput.placeholder = 'Décrivez vos besoins (ex: laptop gaming 3000 TND)...';
+            }
+        }
+
+        let lastMessage = '';
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            lastMessage = message;
+            addMessage(message, true);
+            input.value = '';
+            
+            disableInput(true);
+            showTyping();
+            
+            try {
+                const response = await scoopAI.sendMessage(message);
+                
+                hideTyping();
+                
+                if (response.fallback) {
+                    addErrorMessage(response.error, true);
+                } else {
+                    addMessage(response.response, false, response.products || []);
+                }
+                
+            } catch (error) {
+                hideTyping();
+                console.error('Erreur:', error);
+                addErrorMessage(error.message, true);
+            } finally {
+                disableInput(false);
+            }
+        }
+
+        function retryLastMessage() {
+            if (lastMessage) {
+                document.getElementById('userInput').value = lastMessage;
+                sendMessage();
+            }
+        }
+
+        function sendQuickMessage(message) {
+            document.getElementById('userInput').value = message;
+            sendMessage();
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // Vérification périodique de la connexion
+        setInterval(() => {
+            scoopAI.checkConnection();
+        }, 30000);
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Assistant Scoop IA initialisé avec Deepseek');
+            console.log('API:', API_BASE_URL);
+            console.log('Conversation ID:', conversationId);
+        });
+    </script>
+</body>
+</html>
